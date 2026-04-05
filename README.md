@@ -59,3 +59,10 @@ npm start
 
 Found a bug? Have an idea? Open an issue or PR!
 
+## License
+
+This project is licensed under the **GNU Affero General Public License v3.0**
+
+See [LICENSE](LICENSE) for details.
+
+**In short:** If you use this code to provide a service, you must release your source code.
