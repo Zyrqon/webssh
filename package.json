@@ -1,0 +1,35 @@
+{
+  "name": "webssh",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.3.2",
+    "express-session": "^1.17.3",
+    "express-validator": "^7.3.2",
+    "csurf": "^1.11.0",
+    "cookie-parser": "^1.4.6",
+    "helmet": "^8.1.0",
+    "nodemailer": "^8.0.4",
+    "otplib": "^13.4.0",
+    "qrcode": "^1.5.4",
+    "redis": "^4.6.12",
+    "lru-cache": "^10.1.0",
+    "winston": "^3.11.0",
+    "ipaddr.js": "^2.1.0",
+    "validator": "^13.11.0",
+    "xss": "^1.0.14",
+    "ssh2": "^1.17.0",
+    "sshpk": "^1.18.0",
+    "uuid": "^9.0.1",
+    "ws": "^8.20.0"
+  }
+}

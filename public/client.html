@@ -1,0 +1,1381 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>WebSSH</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" integrity="sha384-LJcOxlx9IMbNXDqJ2axpfEQKkAYbFjJfhXexLfiRJhjDU81mzgkiQq8rkV0j6dVh" crossorigin="anonymous">
+  <style>
+    :root {
+      --bg: #0D1117;
+      --panel: #161B22;
+      --border: #30363D;
+      --accent: #58A6FF;
+      --text: #E6EDF3;
+      --success: #3FB950;
+      --error: #F85149;
+      --text-secondary: rgba(255,255,255,0.6);
+      --key-bg: #21262D;
+    }
+    
+    [data-theme="light"] {
+      --bg: #F6F8FA;
+      --panel: #FFFFFF;
+      --border: #D0D7DE;
+      --accent: #0969DA;
+      --text: #1F2328;
+      --text-secondary: rgba(0,0,0,0.6);
+      --key-bg: #E8EAED;
+    }
+    
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      height: 100vh;
+      height: 100dvh;
+    }
+    
+    /* ===== DESKTOP SIDEBAR ===== */
+    #sidebar {
+      width: 300px;
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+    
+    .sidebar-top {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    
+    .sidebar-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      padding: 8px;
+      border-radius: 8px;
+    }
+    
+    .sidebar-logo:hover { background: var(--border); }
+    .sidebar-logo svg { width: 32px; height: 32px; fill: #6BA4F8; }
+    .logo-text { display: flex; flex-direction: column; }
+    .logo-text span { font-size: 18px; font-weight: 600; color: var(--text); }
+    .logo-text small { font-size: 11px; color: var(--text-secondary); }
+    
+    .connection-list { flex: 1; overflow-y: auto; padding: 12px; }
+    .connection-item {
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 8px;
+      cursor: pointer;
+    }
+    .connection-item:hover { background: var(--border); }
+    .connection-item.active { border-color: var(--accent); background: rgba(88,166,255,0.1); }
+    .connection-item h3 { font-size: 14px; margin-bottom: 4px; }
+    .connection-item p { font-size: 12px; color: var(--text-secondary); }
+    .connection-actions { display: flex; gap: 8px; margin-top: 8px; }
+    .connection-actions button {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 4px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      flex: 1;
+    }
+    .connection-actions button:hover { background: var(--border); }
+    .connection-actions button.delete { color: var(--error); border-color: var(--error); }
+    
+    .sidebar-bottom { padding: 16px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+    .btn-full {
+      width: 100%;
+      padding: 12px;
+      background: var(--border);
+      border: none;
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .btn-full:hover { background: var(--accent); color: white; }
+    .btn-full svg { width: 18px; height: 18px; fill: currentColor; }
+    
+    .sidebar-controls {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+    }
+    
+    .icon-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .icon-btn:hover { background: var(--border); }
+    .icon-btn svg { width: 18px; height: 18px; fill: currentColor; }
+    
+    .term-theme-selector { position: relative; }
+    
+    .term-theme-dropdown {
+      display: none;
+      position: absolute;
+      bottom: 100%;
+      left: 0;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      min-width: 180px;
+      z-index: 100;
+      margin-bottom: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+    
+    @media (pointer: coarse), (max-width: 768px) {
+      .term-theme-selector { display: none; }
+    }
+    
+    .term-theme-dropdown.show { display: block; }
+    
+    .dropdown-title {
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
+    
+    .theme-option {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    
+    .theme-option:hover { background: var(--border); }
+    .theme-option.active { background: var(--accent); color: white; }
+    
+    .theme-preview {
+      width: 20px;
+      height: 14px;
+      border-radius: 3px;
+      border: 1px solid var(--border);
+    }
+    
+    /* ===== MAIN AREA ===== */
+    #main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    #terminal-container { flex: 1; padding: 8px; display: flex; flex-direction: column; min-height: 0; }
+    #terminal { flex: 1; }
+    
+    #mobile-toolbar {
+      display: none;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      gap: 4px;
+      padding: 6px;
+      background: var(--panel);
+      border-top: 2px solid var(--accent);
+      flex-wrap: wrap;
+      z-index: 9999;
+    }
+    
+    .mob-btn {
+      background: var(--key-bg, #21262D);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+      min-width: 40px;
+    }
+    .mob-btn:active { background: var(--accent); color: white; }
+    .mob-btn.active { 
+      background: var(--accent); 
+      color: white; 
+      box-shadow: inset 0 0 0 2px white;
+    }
+    
+    #mobile-input {
+      flex: 1;
+      min-width: 100px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      padding: 8px 10px;
+      font-size: 14px;
+    }
+    
+    .empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 40px;
+      min-height: 100%;
+    }
+    .empty-state svg { width: 80px; height: 80px; fill: #6BA4F8; margin-bottom: 24px; }
+    .empty-state h2 { font-size: 24px; margin-bottom: 12px; }
+    .empty-state p { color: var(--text-secondary); margin-bottom: 16px; max-width: 400px; }
+    
+    .btn {
+      padding: 12px 24px;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 15px;
+      font-weight: 600;
+      text-decoration: none;
+      display: inline-block;
+    }
+    .btn:hover { opacity: 0.9; }
+    .btn-donate {
+      background: linear-gradient(135deg, #f5a623, #f5d742);
+      color: #000 !important;
+      margin-top: 8px;
+    }
+    .features {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+      margin-bottom: 16px;
+    }
+    .feature {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      border-radius: 16px;
+      font-size: 12px;
+    }
+    
+    .status-bar {
+      padding: 8px 16px;
+      background: var(--panel);
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 16px;
+      font-size: 13px;
+    }
+    .status-item { display: flex; align-items: center; gap: 6px; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
+    .status-dot.connected { background: var(--success); }
+    .status-dot.error { background: var(--error); }
+    
+    /* ===== MODAL ===== */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      width: 90%;
+      max-width: 480px;
+    }
+    .modal h3 { margin-bottom: 20px; font-size: 20px; }
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; margin-bottom: 8px; font-size: 14px; }
+    .form-group input, .form-group select, .form-group textarea {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 14px;
+    }
+    .form-group input:focus { outline: none; border-color: var(--accent); }
+    .modal-actions { display: flex; gap: 12px; margin-top: 20px; }
+    .modal-actions .btn { flex: 1; }
+    .btn-danger { background: var(--error) !important; }
+    .btn-secondary { background: var(--border); }
+    
+    /* ===== MOBILE HEADER ===== */
+    .mobile-header {
+      display: none;
+      align-items: center;
+      padding: 8px 12px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      gap: 12px;
+    }
+    
+    .mobile-menu-btn {
+      background: transparent;
+      border: none;
+      color: var(--text);
+      padding: 8px;
+      cursor: pointer;
+    }
+    .mobile-menu-btn svg { width: 24px; height: 24px; fill: currentColor; }
+    
+    .mobile-title { font-size: 16px; font-weight: 600; flex: 1; }
+    
+    .mobile-status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+    }
+    
+    /* ===== MOBILE SIDEBAR ===== */
+    #mobile-sidebar {
+      display: none;
+      position: fixed;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 85%;
+      max-width: 320px;
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      z-index: 200;
+      flex-direction: column;
+    }
+    
+    #mobile-sidebar.open { display: flex; }
+    
+    .mobile-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 100;
+    }
+    .mobile-overlay.show { display: block; }
+    
+    .mobile-sidebar-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--panel);
+    }
+    .mobile-sidebar-header svg { width: 32px; height: 32px; fill: var(--accent); }
+    .mobile-sidebar-header h2 { font-size: 18px; color: var(--text); }
+    .mobile-sidebar-header small { font-size: 11px; color: var(--text-secondary); }
+    
+    .mobile-sidebar-content { flex: 1; overflow-y: auto; padding: 12px; background: var(--panel); }
+    .mobile-sidebar-footer { padding: 12px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; background: var(--panel); }
+    
+    /* ===== MOBILE STYLES ===== */
+    @media (pointer: coarse), (max-width: 768px) {
+      #sidebar { display: none !important; }
+      #main { 
+        width: 100%; 
+        height: 100vh;
+        height: 100dvh;
+      }
+      
+      body { 
+        background: var(--bg);
+        height: 100vh;
+        height: 100dvh;
+      }
+      
+      .mobile-header { display: flex !important; background: var(--panel); }
+      .mobile-overlay { background: var(--panel); }
+      .mobile-status .status-dot { background: var(--border); }
+      .mobile-status span { color: var(--text); }
+      
+      #terminal-container {
+        flex: 1;
+        padding: 4px;
+        background: var(--bg);
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      #terminal {
+        flex: 1;
+        min-height: 0;
+      }
+      
+      .empty-state { 
+        padding: 20px; 
+        background: var(--bg);
+      }
+      .empty-state svg { width: 60px; height: 60px; fill: var(--accent); }
+      .empty-state h2 { font-size: 20px; color: var(--text); }
+      .empty-state p { color: var(--text-secondary); background: var(--bg); }
+      .empty-state .btn { background: var(--accent); color: white; }
+      
+      .modal { margin: 16px; padding: 16px; background: var(--panel); }
+      .modal h3 { font-size: 18px; margin-bottom: 16px; color: var(--text); }
+      .form-group { margin-bottom: 12px; }
+      .form-group label { color: var(--text-secondary); }
+      .form-group input, .form-group select, .form-group textarea { 
+        font-size: 16px; 
+        padding: 14px 12px;
+        background: var(--bg);
+        border-color: var(--border);
+        color: var(--text);
+      }
+      .modal-actions { flex-direction: column; }
+      .modal-actions .btn { width: 100%; }
+      .btn { padding: 14px 20px; font-size: 16px; }
+      .btn-secondary { background: var(--border); color: var(--text); }
+      .btn-danger { background: var(--error); }
+      
+      .status-bar { 
+        padding: 6px 12px; 
+        font-size: 12px; 
+        background: var(--panel); 
+        color: var(--text); 
+        padding-bottom: 50px;
+      }
+      
+      #terminal-container {
+        touch-action: manipulation;
+        flex: 1;
+        min-height: 0;
+        cursor: text;
+        padding-bottom: 0;
+      }
+      
+      #terminal {
+        flex: 1;
+        min-height: 0;
+      }
+      
+      #mobile-toolbar {
+        display: flex !important;
+      }
+      
+      .feature { background: var(--panel); border-color: var(--border); color: var(--text); }
+      .btn-donate { background: linear-gradient(135deg, #f5a623, #f5d742); }
+      
+      .connection-item { background: var(--panel); border-color: var(--border); }
+      .connection-item h3 { color: var(--text); }
+      .connection-item p { color: var(--text-secondary); }
+      .connection-actions button { background: var(--border); color: var(--text); border-color: var(--border); }
+      
+      .btn-full { background: var(--border); color: var(--text); }
+    }
+    
+    .mobile-sidebar-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .mobile-sidebar-header svg { width: 32px; height: 32px; fill: var(--accent); }
+    .mobile-sidebar-header h2 { font-size: 18px; }
+    .mobile-sidebar-header small { font-size: 11px; color: var(--text-secondary); }
+    
+    .mobile-sidebar-content { flex: 1; overflow-y: auto; padding: 12px; }
+    .mobile-sidebar-footer { padding: 12px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+  </style>
+</head>
+<body>
+  <!-- Desktop Sidebar -->
+  <aside id="sidebar">
+    <div class="sidebar-top">
+      <a href="/connect" class="sidebar-logo">
+        <svg viewBox="0 0 24 24"><path d="M21 2H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h7l-2 3v1h8v-1l-2-3h7c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-9 15c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6z"/></svg>
+        <div class="logo-text">
+          <span>WebSSH</span>
+          <small>SSH в браузере</small>
+        </div>
+      </a>
+    </div>
+    <div class="connection-list" id="connection-list"></div>
+    <div class="sidebar-bottom">
+      <button class="btn-full" id="profile-btn">
+        <svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+        Профиль
+      </button>
+      <button class="btn-full" id="add-btn">
+        <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+        Новое подключение
+      </button>
+      <div class="sidebar-controls">
+        <div class="term-theme-selector" id="term-theme-selector">
+          <button class="icon-btn" id="theme-btn" title="Тема терминала">
+            <svg viewBox="0 0 24 24"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/></svg>
+          </button>
+          <div class="term-theme-dropdown" id="term-theme-dropdown">
+            <div class="dropdown-title">Тема терминала</div>
+            <div id="theme-options"></div>
+          </div>
+        </div>
+        <button class="icon-btn" id="logout-btn" title="Выйти">
+          <svg viewBox="0 0 24 24"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
+        </button>
+      </div>
+    </div>
+  </aside>
+  
+  <!-- Mobile Overlay -->
+  <div class="mobile-overlay" id="mobile-overlay"></div>
+  
+  <!-- Mobile Sidebar -->
+  <aside id="mobile-sidebar">
+    <div class="mobile-sidebar-header">
+      <svg viewBox="0 0 24 24"><path d="M21 2H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h7l-2 3v1h8v-1l-2-3h7c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-9 15c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6z"/></svg>
+      <div>
+        <h2>WebSSH</h2>
+        <small>SSH в браузере</small>
+      </div>
+    </div>
+    <div class="mobile-sidebar-content">
+      <div id="mobile-connection-list"></div>
+    </div>
+    <div class="mobile-sidebar-footer">
+      <button class="btn-full" id="mobile-profile-btn">
+        <svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+        Профиль
+      </button>
+      <button class="btn-full" id="mobile-add-btn">
+        <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+        Новое подключение
+      </button>
+      <div class="sidebar-controls">
+        <button class="icon-btn" id="mobile-theme-btn">
+          <svg viewBox="0 0 24 24"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/></svg>
+        </button>
+        <button class="icon-btn" id="mobile-logout-btn">
+          <svg viewBox="0 0 24 24"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
+        </button>
+      </div>
+    </div>
+  </aside>
+  
+  <!-- Main -->
+  <main id="main">
+    <!-- Mobile Header -->
+    <header class="mobile-header">
+      <button class="mobile-menu-btn" id="mobile-menu-btn">
+        <svg viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
+      </button>
+      <span class="mobile-title">WebSSH</span>
+      <div class="mobile-status">
+        <div class="status-dot" id="mobile-status-dot"></div>
+        <span id="mobile-status-text">Offline</span>
+      </div>
+    </header>
+    
+    <div id="terminal-container">
+      <div id="terminal"></div>
+      <div class="empty-state" id="empty-state">
+        <svg viewBox="0 0 24 24"><path d="M21 2H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h7l-2 3v1h8v-1l-2-3h7c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-9 15c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6z"></path></svg>
+        <h2>WebSSH</h2>
+        <p>SSH клиент в браузере</p>
+        <div class="features">
+          <span class="feature">🔒 Безопасное SSH</span>
+          <span class="feature">📱 Мобильная версия</span>
+          <span class="feature">☁️ Облачные подключения</span>
+        </div>
+        <button class="btn" id="welcome-add-btn">+ Новое подключение</button>
+        <a href="https://www.donationalerts.com/r/rtyfctujucjty" target="_blank" class="btn btn-donate">❤️ Поддержать</a>
+      </div>
+    </div>
+    
+    <div class="status-bar">
+      <div class="status-item">
+        <div class="status-dot" id="status-dot"></div>
+        <span id="status-text">Offline</span>
+      </div>
+      <div class="status-item" id="connection-info" style="display: none;"></div>
+    </div>
+    
+    <!-- Mobile Keyboard Toolbar -->
+    <div id="mobile-toolbar">
+      <button class="mob-btn" data-key="Escape">Esc</button>
+      <button class="mob-btn" data-key="Tab">Tab</button>
+      <button class="mob-btn" data-mod="ctrl">Ctrl</button>
+      <button class="mob-btn" data-mod="alt">Alt</button>
+      <button class="mob-btn" data-key="up">↑</button>
+      <button class="mob-btn" data-key="down">↓</button>
+      <button class="mob-btn" data-key="left">←</button>
+      <button class="mob-btn" data-key="right">→</button>
+      <button class="mob-btn" id="term-theme-btn" title="Тема терминала">🎨</button>
+      <input type="text" id="mobile-input" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" placeholder="Введите...">
+    </div>
+  </main>
+  
+
+  
+  <!-- Modal -->
+  <div class="modal-overlay" id="modal">
+    <div class="modal">
+      <h3 id="modal-title">Новое подключение</h3>
+      <form id="connection-form">
+        <div class="form-group">
+          <label>Имя</label>
+          <input type="text" name="name" placeholder="Мой сервер" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label>Хост</label>
+          <input type="text" name="host" placeholder="192.168.1.1" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label>Порт</label>
+          <input type="number" name="port" value="22">
+        </div>
+        <div class="form-group">
+          <label>Пользователь</label>
+          <input type="text" name="username" placeholder="root" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label>Тип авторизации</label>
+          <select name="authType">
+            <option value="password">Пароль</option>
+            <option value="key">SSH ключ</option>
+          </select>
+        </div>
+        <div class="form-group" id="password-group">
+          <label>Пароль</label>
+          <input type="password" name="password" autocomplete="current-password">
+        </div>
+        <div class="form-group" id="key-group" style="display: none;">
+          <label>Приватный ключ</label>
+          <textarea name="privateKey" rows="3" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-danger" id="delete-btn" style="display: none;">Удалить</button>
+          <button type="button" class="btn btn-secondary" id="cancel-btn">Отмена</button>
+          <button type="submit" class="btn">Сохранить</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  
+  <div class="modal-overlay" id="profile-modal">
+    <div class="modal">
+      <h3>Профиль</h3>
+      <form id="profile-form">
+        <div class="form-group">
+          <label>Пользователь</label>
+          <input type="text" name="username" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label>Текущий пароль</label>
+          <input type="password" name="currentPassword" autocomplete="current-password">
+        </div>
+        <div class="form-group">
+          <label>Новый пароль</label>
+          <input type="password" name="newPassword" autocomplete="new-password">
+        </div>
+        <div class="form-group">
+          <label>Двухфакторная аутентификация</label>
+          <div id="totp-status" style="display:flex;gap:8px;align-items:center;">
+            <span id="totp-label" style="font-size:14px;color:var(--text-secondary);">Загрузка...</span>
+            <button type="button" class="btn btn-secondary" id="setup-2fa-btn" style="display:none;font-size:12px;padding:6px 12px;">Включить</button>
+            <button type="button" class="btn btn-danger" id="disable-2fa-btn" style="display:none;font-size:12px;padding:6px 12px;">Выключить</button>
+          </div>
+        </div>
+        <div id="totp-setup" class="form-group" style="display:none;">
+          <label>Отсканируйте QR код:</label>
+          <img id="totp-qr" style="max-width:200px;border-radius:8px;margin:8px 0;">
+          <input type="text" id="totp-code" placeholder="000000" maxlength="6" autocomplete="off" style="text-align:center;font-size:18px;letter-spacing:4px;">
+          <button type="button" class="btn" id="verify-2fa-btn" style="margin-top:8px;">Подтвердить</button>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" id="profile-close-btn">Закрыть</button>
+          <button type="submit" class="btn">Сохранить</button>
+        </div>
+        <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);">
+          <button type="button" class="btn btn-secondary" id="logout-profile-btn" style="margin-bottom:8px;width:100%;">Выйти из аккаунта</button>
+          <button type="button" class="btn btn-danger" id="delete-account-btn" style="width:100%;">Удалить аккаунт</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+   <!-- ✓ MEDIUM #15: Add SRI (Subresource Integrity) to CDN resources -->
+   <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js" integrity="sha384-/nfmYPUzWMS6v2atn8hbljz7NE0EI1iGx34lJaNzyVjWGDzMv+ciUZUeJpKA3Glc" crossorigin="anonymous"></script>
+   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js" integrity="sha384-AQLWHRKAgdTxkolJcLOELg4E9rE89CPE2xMy3tIRFn08NcGKPTsELdvKomqji+DL" crossorigin="anonymous"></script>
+  <script>
+    const $ = id => document.getElementById(id);
+    
+    let ws = null;
+    let term = null;
+    let fitAddon = null;
+    let connections = [];
+    let editingId = null;
+    let currentConnection = null;
+    let currentUsername = '';
+    let isMobile = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    
+    async function ensureAuth() {
+      try {
+        const res = await fetch('/api/me');
+        if (!res.ok) { window.location.href = '/login'; return false; }
+        const me = await res.json().catch(() => ({}));
+        currentUsername = me.username || '';
+        return true;
+      } catch (e) { window.location.href = '/login'; return false; }
+    }
+    
+    const terminalThemes = [
+      { name: 'По умолчанию (Dark)', bg: '#0D1117', fg: '#E6EDF3', cursor: '#E6EDF3', accent: '#58A6FF', light: false, pageBg: '#0D1117' },
+      { name: 'GitHub Light', bg: '#F6F8FA', fg: '#1F2328', cursor: '#1F2328', accent: '#0969DA', light: true, pageBg: '#F6F8FA' },
+      { name: 'Monokai', bg: '#272822', fg: '#F8F8F2', cursor: '#F8F8F2', accent: '#F92672', light: false, pageBg: '#272822' },
+      { name: 'Dracula', bg: '#282A36', fg: '#F8F8F2', cursor: '#F8F8F2', accent: '#BD93F9', light: false, pageBg: '#282A36' },
+      { name: 'Nord', bg: '#2E3440', fg: '#ECEFF4', cursor: '#ECEFF4', accent: '#88C0D0', light: false, pageBg: '#2E3440' },
+      { name: 'Solarized Dark', bg: '#002B36', fg: '#839496', cursor: '#839496', accent: '#268BD2', light: false, pageBg: '#002B36' },
+      { name: 'Solarized Light', bg: '#FDF6E3', fg: '#657B83', cursor: '#657B83', accent: '#268BD2', light: true, pageBg: '#FDF6E3' },
+      { name: 'One Dark', bg: '#282C34', fg: '#ABB2BF', cursor: '#ABB2BF', accent: '#61AFEF', light: false, pageBg: '#282C34' },
+    ];
+    
+    let currentTermTheme = parseInt(localStorage.getItem('term-theme') || 0);
+    
+    function getTermTheme() {
+      const t = terminalThemes[currentTermTheme];
+      return { background: t.bg, foreground: t.fg, cursor: t.cursor };
+    }
+    
+    function getTermThemeName() {
+      return terminalThemes[currentTermTheme].name;
+    }
+    
+    function applyThemeColors() {
+      const t = terminalThemes[currentTermTheme];
+      if (term) {
+        term.options.theme = getTermTheme();
+      }
+      const container = $('terminal-container');
+      if (container) {
+        container.style.background = t.bg;
+      }
+      if (term && term.element) {
+        term.element.style.background = t.bg;
+      }
+      if (t.light) {
+        document.documentElement.style.setProperty('--bg', '#F6F8FA');
+        document.documentElement.style.setProperty('--panel', '#FFFFFF');
+        document.documentElement.style.setProperty('--border', '#D0D7DE');
+        document.documentElement.style.setProperty('--text', '#1F2328');
+        document.documentElement.style.setProperty('--text-secondary', '#57606A');
+      } else {
+        document.documentElement.style.setProperty('--bg', '#0D1117');
+        document.documentElement.style.setProperty('--panel', '#161B22');
+        document.documentElement.style.setProperty('--border', '#30363D');
+        document.documentElement.style.setProperty('--text', '#E6EDF3');
+        document.documentElement.style.setProperty('--text-secondary', '#B1BAC4');
+      }
+    }
+    
+    function cycleTermTheme() {
+      currentTermTheme = (currentTermTheme + 1) % terminalThemes.length;
+      localStorage.setItem('term-theme', currentTermTheme);
+      applyThemeColors();
+      const btn = $('term-theme-btn');
+      if (btn) btn.textContent = getTermThemeName().split(' ')[0];
+    }
+    
+    function selectTermTheme(index) {
+      currentTermTheme = index;
+      localStorage.setItem('term-theme', currentTermTheme);
+      applyThemeColors();
+      document.querySelectorAll('.theme-option').forEach((el, i) => {
+        el.classList.toggle('active', i === currentTermTheme);
+      });
+      const btn = $('term-theme-btn');
+      if (btn) btn.textContent = getTermThemeName().split(' ')[0];
+    }
+    
+    function initTerminal() {
+      if (term) term.dispose();
+      
+      term = new Terminal({
+        fontFamily: '"SF Mono", "Monaco", "Menlo", monospace',
+        fontSize: isMobile ? 11 : 14,
+        theme: getTermTheme(),
+        cursorBlink: true
+      });
+      
+      fitAddon = new FitAddon.FitAddon();
+      term.loadAddon(fitAddon);
+      
+      term.onData(data => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'data', data }));
+        }
+      });
+      
+      term.onResize(({ cols, rows }) => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+        }
+      });
+      
+      term.open($('terminal'));
+      applyThemeColors();
+      setTimeout(() => fitAddon && fitAddon.fit(), 50);
+      
+      if (isMobile) {
+        setupMobileKeyboard();
+      }
+      
+      const themeBtn = $('term-theme-btn');
+      if (themeBtn) {
+        themeBtn.textContent = getTermThemeName().split(' ')[0];
+        themeBtn.onclick = cycleTermTheme;
+      }
+    }
+    
+    let mobileKeyboardSetup = false;
+    let modifiers = { ctrl: false, alt: false };
+    const ctrlMap = { c: '\x03', d: '\x04', z: '\x1a', l: '\x0c', a: '\x01', e: '\x05', u: '\x15', y: '\x19', ']': '\x1d' };
+    
+    function sendSpecial(key) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const keyMap = {
+        'Escape': '\x1b', 'Tab': '\t',
+        'up': '\x1b[A', 'down': '\x1b[B', 'right': '\x1b[C', 'left': '\x1b[D'
+      };
+      if (keyMap[key]) {
+        ws.send(JSON.stringify({ type: 'data', data: keyMap[key] }));
+      }
+    }
+    
+    function updateModButtons() {
+      document.querySelectorAll('.mob-btn[data-mod]').forEach(btn => {
+        const mod = btn.dataset.mod;
+        btn.classList.toggle('active', modifiers[mod]);
+      });
+    }
+    
+    function setupMobileKeyboard() {
+      if (mobileKeyboardSetup) return;
+      mobileKeyboardSetup = true;
+      
+      const mobileInput = $('mobile-input');
+      const terminalContainer = $('terminal-container');
+      const toolbar = $('mobile-toolbar');
+      
+      if (!mobileInput || !terminalContainer || !toolbar) return;
+      
+      mobileInput.addEventListener('input', (e) => {
+        const data = e.target.value;
+        if (!data || !ws || ws.readyState !== WebSocket.OPEN) {
+          mobileInput.value = '';
+          return;
+        }
+        let char = data[0];
+        if (modifiers.ctrl && ctrlMap[char]) {
+          ws.send(JSON.stringify({ type: 'data', data: ctrlMap[char] }));
+        } else if (modifiers.ctrl) {
+          ws.send(JSON.stringify({ type: 'data', data: '\x1b' + char }));
+        } else if (modifiers.alt) {
+          ws.send(JSON.stringify({ type: 'data', data: '\x1b' + char }));
+        } else {
+          ws.send(JSON.stringify({ type: 'data', data: char }));
+        }
+        modifiers.ctrl = false;
+        modifiers.alt = false;
+        updateModButtons();
+        mobileInput.value = '';
+      });
+      
+      mobileInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'data', data: '\r' }));
+          }
+          e.preventDefault();
+        }
+      });
+      
+      document.querySelectorAll('.mob-btn[data-key]').forEach(btn => {
+        btn.addEventListener('click', () => sendSpecial(btn.dataset.key));
+      });
+      
+      document.querySelectorAll('.mob-btn[data-mod]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const mod = btn.dataset.mod;
+          modifiers[mod] = !modifiers[mod];
+          updateModButtons();
+          mobileInput.focus();
+        });
+      });
+      
+      terminalContainer.addEventListener('click', (e) => {
+        if (currentConnection && !e.target.closest('.mob-btn')) {
+          mobileInput.focus();
+        }
+      });
+    }
+    
+    function showMobileToolbar() {
+      const toolbar = $('mobile-toolbar');
+      if (toolbar) toolbar.style.display = 'flex';
+    }
+    
+    function hideMobileToolbar() {
+      const toolbar = $('mobile-toolbar');
+      if (toolbar) toolbar.style.display = 'none';
+    }
+    
+    function connect(conn) {
+      if (ws) ws.close();
+      
+      initTerminal();
+      currentConnection = conn;
+      
+      $('empty-state').style.display = 'none';
+      
+      if (isMobile) {
+        closeMobileSidebar();
+      }
+      
+      setStatus('connecting');
+      
+      const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+      ws = new WebSocket(`${wsProto}://${location.host}/ws`);
+      
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: 'connect', connectionId: conn.id }));
+      };
+      
+      ws.onmessage = (e) => {
+        const data = JSON.parse(e.data);
+        if (data.type === 'ready') {
+          setStatus('connected', conn.name);
+          term.focus();
+          if (isMobile) showMobileToolbar();
+        } else if (data.type === 'data') {
+          term.write(data.data);
+        } else if (data.type === 'close') {
+          setStatus('disconnect');
+          if (isMobile) hideMobileToolbar();
+        } else if (data.type === 'error') {
+          setStatus('error', data.message);
+        }
+      };
+      
+      ws.onclose = () => {
+        if (currentConnection) {
+          setStatus('disconnect');
+          if (isMobile) hideMobileToolbar();
+        }
+      };
+    }
+    
+    function setStatus(status, info = '') {
+      const dot = $('status-dot');
+      const mobileDot = $('mobile-status-dot');
+      const text = $('status-text');
+      const mobileText = $('mobile-status-text');
+      
+      dot.className = 'status-dot';
+      mobileDot.className = 'status-dot';
+      if (status === 'connected') { dot.classList.add('connected'); mobileDot.classList.add('connected'); }
+      if (status === 'error') { dot.classList.add('error'); mobileDot.classList.add('error'); }
+      
+      const labels = { offline: 'Offline', connecting: 'Подключение...', connected: info, disconnect: 'Отключено', error: 'Ошибка' };
+      text.textContent = labels[status] || status;
+      mobileText.textContent = labels[status] || status;
+    }
+    
+    function openMobileSidebar() {
+      $('mobile-sidebar').classList.add('open');
+      $('mobile-overlay').classList.add('show');
+    }
+    
+    function closeMobileSidebar() {
+      $('mobile-sidebar').classList.remove('open');
+      $('mobile-overlay').classList.remove('show');
+    }
+    
+    async function loadConnections() {
+      const res = await fetch('/api/connections');
+      connections = await res.json();
+      renderConnections();
+    }
+    
+    function renderConnections() {
+      const container = $('connection-list');
+      const mobileContainer = $('mobile-connection-list');
+      
+      // ✓ Безопасное создание элементов - использование DOM API вместо innerHTML
+      container.innerHTML = '';
+      mobileContainer.innerHTML = '';
+      
+      for (const c of connections) {
+        const item = document.createElement('div');
+        item.className = `connection-item ${currentConnection?.id === c.id ? 'active' : ''}`;
+        item.dataset.id = c.id;
+        
+        const h3 = document.createElement('h3');
+        h3.textContent = c.name; // ✓ Безопасно - текст, не HTML
+        
+        const p = document.createElement('p');
+        p.textContent = `${c.username}@${c.host}:${c.port}`; // ✓ Безопасно
+        
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'connection-actions';
+        
+        const editBtn = document.createElement('button');
+        editBtn.className = 'edit-btn';
+        editBtn.dataset.id = c.id;
+        editBtn.textContent = 'Edit';
+        
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'delete delete-btn';
+        deleteBtn.dataset.id = c.id;
+        deleteBtn.textContent = 'Del';
+        
+        actionsDiv.appendChild(editBtn);
+        actionsDiv.appendChild(deleteBtn);
+        
+        item.appendChild(h3);
+        item.appendChild(p);
+        item.appendChild(actionsDiv);
+        
+        container.appendChild(item.cloneNode(true));
+        mobileContainer.appendChild(item);
+      }
+      
+      document.querySelectorAll('.connection-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+          if (e.target.classList.contains('delete-btn')) {
+            e.stopPropagation();
+            if (confirm('Удалить?')) {
+              fetch(`/api/connections/${item.dataset.id}`, { method: 'DELETE' }).then(loadConnections);
+            }
+          } else if (e.target.classList.contains('edit-btn')) {
+            e.stopPropagation();
+            fetch(`/api/connections/${item.dataset.id}`)
+              .then(res => res.json())
+              .then(conn => editConnection(conn));
+          } else {
+            connect(connections.find(c => c.id === item.dataset.id));
+          }
+        });
+      });
+    }
+    
+    function editConnection(conn) {
+      editingId = conn.id;
+      $('modal-title').textContent = 'Редактировать';
+      const form = $('connection-form');
+      form.name.value = conn.name || '';
+      form.host.value = conn.host || '';
+      form.port.value = conn.port || 22;
+      form.username.value = conn.username || '';
+      form.authType.value = conn.authType || 'password';
+      form.password.value = '';
+      form.privateKey.value = conn.privateKey || '';
+      $('password-group').style.display = form.authType.value === 'password' ? 'block' : 'none';
+      $('key-group').style.display = form.authType.value === 'key' ? 'block' : 'none';
+      $('delete-btn').style.display = 'block';
+      closeMobileSidebar();
+      $('modal').classList.add('active');
+    }
+    
+    // Event listeners
+    $('mobile-menu-btn').addEventListener('click', openMobileSidebar);
+    $('mobile-overlay').addEventListener('click', closeMobileSidebar);
+    
+    $('add-btn').addEventListener('click', () => {
+      editingId = null;
+      $('modal-title').textContent = 'Новое подключение';
+      $('connection-form').reset();
+      $('delete-btn').style.display = 'none';
+      $('modal').classList.add('active');
+    });
+    
+    $('mobile-add-btn').addEventListener('click', () => {
+      editingId = null;
+      $('modal-title').textContent = 'Новое подключение';
+      $('connection-form').reset();
+      $('delete-btn').style.display = 'none';
+      closeMobileSidebar();
+      $('modal').classList.add('active');
+    });
+    
+    $('welcome-add-btn').addEventListener('click', () => {
+      editingId = null;
+      $('modal-title').textContent = 'Новое подключение';
+      $('connection-form').reset();
+      $('delete-btn').style.display = 'none';
+      $('modal').classList.add('active');
+    });
+    
+    $('cancel-btn').addEventListener('click', () => $('modal').classList.remove('active'));
+    
+    $('connection-form').authType.addEventListener('change', (e) => {
+      $('password-group').style.display = e.target.value === 'password' ? 'block' : 'none';
+      $('key-group').style.display = e.target.value === 'key' ? 'block' : 'none';
+    });
+    
+    $('connection-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = e.target;
+      const data = {
+        name: form.name.value,
+        host: form.host.value,
+        port: parseInt(form.port.value) || 22,
+        username: form.username.value,
+        authType: form.authType.value,
+        password: form.password.value,
+        privateKey: form.privateKey.value
+      };
+      
+      try {
+        let res;
+        if (editingId) {
+          res = await fetch(`/api/connections/${editingId}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+          });
+        } else {
+          res = await fetch('/api/connections', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+          });
+        }
+        
+        if (!res.ok) { alert('Ошибка сохранения'); return; }
+        $('modal').classList.remove('active');
+        loadConnections();
+      } catch (err) { alert('Ошибка'); }
+    });
+    
+    $('delete-btn').addEventListener('click', async () => {
+      if (!confirm('Удалить?')) return;
+      await fetch(`/api/connections/${editingId}`, { method: 'DELETE' });
+      $('modal').classList.remove('active');
+      loadConnections();
+    });
+    
+    function updateTheme() {
+      if (term) {
+        term.options.theme = getTermTheme();
+      }
+    }
+    
+    // Theme dropdown for terminal
+    const themeSelector = $('term-theme-selector');
+    const themeDropdown = $('term-theme-dropdown');
+    const themeOptions = $('theme-options');
+    
+    if (themeSelector && themeDropdown && themeOptions) {
+      // Click on moon icon opens dropdown
+      $('theme-btn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        themeDropdown.classList.toggle('show');
+      });
+      
+      document.addEventListener('click', () => {
+        themeDropdown.classList.remove('show');
+      });
+      
+      themeOptions.innerHTML = terminalThemes.map((t, i) => `
+        <div class="theme-option ${i === currentTermTheme ? 'active' : ''}" data-index="${i}">
+          <div class="theme-preview" style="background:${t.bg};border-color:${t.fg};"></div>
+          <span>${t.name}</span>
+        </div>
+      `).join('');
+      
+      themeOptions.addEventListener('click', (e) => {
+        const option = e.target.closest('.theme-option');
+        if (option) {
+          selectTermTheme(parseInt(option.dataset.index));
+          themeDropdown.classList.remove('show');
+        }
+      });
+    }
+    
+    $('mobile-theme-btn')?.addEventListener('click', () => {
+      cycleTermTheme();
+    });
+    
+    $('logout-btn').addEventListener('click', () => {
+      fetch('/api/logout', { method: 'POST' }).then(() => {
+        window.location.href = '/';
+      }).catch(() => {
+        window.location.href = '/';
+      });
+    });
+    
+    $('mobile-logout-btn').addEventListener('click', () => {
+      fetch('/api/logout', { method: 'POST' }).then(() => {
+        window.location.href = '/';
+      }).catch(() => {
+        window.location.href = '/';
+      });
+    });
+    
+    $('profile-close-btn').addEventListener('click', () => $('profile-modal').classList.remove('active'));
+    
+    // 2FA functions
+    async function check2FAStatus() {
+      try {
+        const res = await fetch('/api/user');
+        if (!res.ok) return;
+        const user = await res.json();
+        
+        if (user.twoFactorEnabled) {
+          $('totp-label').textContent = '2FA включена ✓';
+          $('totp-label').style.color = 'var(--success)';
+          $('setup-2fa-btn').style.display = 'none';
+          $('disable-2fa-btn').style.display = 'inline-block';
+          $('totp-setup').style.display = 'none';
+        } else {
+          $('totp-label').textContent = '2FA отключена';
+          $('totp-label').style.color = 'var(--text-secondary)';
+          $('setup-2fa-btn').style.display = 'inline-block';
+          $('disable-2fa-btn').style.display = 'none';
+        }
+      } catch (e) {}
+    }
+    
+    $('setup-2fa-btn').addEventListener('click', async () => {
+      try {
+        const res = await fetch('/api/setup-2fa', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({})
+        });
+        const data = await res.json();
+        if (!res.ok) { alert(data.error || 'Ошибка'); return; }
+        if (data.qrCode) {
+          $('totp-qr').src = data.qrCode;
+          $('totp-setup').style.display = 'block';
+          $('totp-label').textContent = 'Сканируйте QR код и введите код';
+        }
+      } catch (e) { alert('Ошибка'); }
+    });
+    
+    $('verify-2fa-btn').addEventListener('click', async () => {
+      const code = $('totp-code').value;
+      if (!code || code.length !== 6) { alert('Введите 6-значный код'); return; }
+      try {
+        const res = await fetch('/api/verify-2fa', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code })
+        });
+        if (res.ok) {
+          alert('2FA успешно настроена!');
+          check2FAStatus();
+        } else {
+          const data = await res.json();
+          alert(data.error || 'Неверный код');
+        }
+      } catch (e) { alert('Ошибка'); }
+    });
+    
+    $('disable-2fa-btn').addEventListener('click', async () => {
+      const password = prompt('Введите пароль для отключения 2FA:');
+      if (!password) return;
+      try {
+        const res = await fetch('/api/disable-2fa', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password })
+        });
+        if (res.ok) {
+          alert('2FA отключена');
+          check2FAStatus();
+        } else {
+          const data = await res.json();
+          alert(data.error || 'Ошибка');
+        }
+      } catch (e) { alert('Ошибка'); }
+    });
+    
+    $('logout-profile-btn').addEventListener('click', () => {
+      fetch('/api/logout', { method: 'POST' }).then(() => {
+        window.location.href = '/';
+      }).catch(() => {
+        window.location.href = '/';
+      });
+    });
+    
+    $('delete-account-btn').addEventListener('click', async () => {
+      if (!confirm('Вы уверены? Это действие нельзя отменить!')) return;
+      const password = prompt('Введите пароль для подтверждения:');
+      if (!password) return;
+      try {
+        const res = await fetch('/api/delete-account', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password })
+        });
+        if (res.ok) {
+          alert('Аккаунт удалён');
+          fetch('/api/logout', { method: 'POST' }).catch(() => {});
+          window.location.href = '/login';
+        } else {
+          const data = await res.json();
+          alert(data.error || 'Ошибка');
+        }
+      } catch (e) { alert('Ошибка'); }
+    });
+    
+    $('profile-btn').addEventListener('click', () => {
+      $('profile-form').username.value = currentUsername;
+      $('profile-form').currentPassword.value = '';
+      $('profile-form').newPassword.value = '';
+      $('totp-code').value = '';
+      check2FAStatus();
+      $('profile-modal').classList.add('active');
+    });
+    
+    $('mobile-profile-btn').addEventListener('click', () => {
+      $('profile-form').username.value = currentUsername;
+      $('profile-form').currentPassword.value = '';
+      $('profile-form').newPassword.value = '';
+      $('totp-code').value = '';
+      check2FAStatus();
+      closeMobileSidebar();
+      $('profile-modal').classList.add('active');
+    });
+    
+    window.addEventListener('resize', () => fitAddon && fitAddon.fit());
+    
+    // Init
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', savedTheme);
+    hideMobileToolbar();
+    
+    ensureAuth().then((ok) => { 
+      if (ok) loadConnections(); 
+    });
+  </script>
+</body>
+</html>

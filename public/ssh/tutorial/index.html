@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Как подключиться к серверу через SSH — пошаговое руководство | webssh.su</title>
+  <meta name="description" content="Как подключиться к серверу по SSH. Подробное руководство для начинающих: настройка, команды, решение проблем.">
+  <meta name="keywords" content="как подключиться по ssh, ssh подключение, настройка ssh, руководство по ssh, ssh для начинающих">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://webssh.su/ssh/tutorial">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <style>
+    :root { --bg: #0D1117; --panel: #161B22; --border: #30363D; --accent: #58A6FF; --text: #E6EDF3; --text-secondary: #B1BAC4; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; }
+    .container { max-width: 800px; margin: 0 auto; padding: 40px 20px; }
+    a { color: var(--accent); }
+    h1 { font-size: 36px; margin-bottom: 20px; }
+    h2 { font-size: 28px; margin: 40px 0 20px; }
+    h3 { font-size: 22px; margin: 30px 0 15px; }
+    p { margin-bottom: 16px; color: var(--text-secondary); }
+    ul, ol { margin: 16px 0; padding-left: 24px; color: var(--text-secondary); }
+    li { margin-bottom: 8px; }
+    .btn { display: inline-block; background: var(--accent); color: white; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; margin: 20px 0; }
+    .btn:hover { opacity: 0.9; }
+    .breadcrumb { margin-bottom: 20px; font-size: 14px; color: var(--text-secondary); }
+    .breadcrumb a { color: var(--text-secondary); }
+    code { background: var(--panel); padding: 2px 6px; border-radius: 4px; font-family: monospace; }
+    pre { background: var(--panel); padding: 16px; border-radius: 8px; overflow-x: auto; margin: 16px 0; font-family: monospace; }
+    .step { background: var(--panel); padding: 24px; border-radius: 12px; margin: 20px 0; border: 1px solid var(--border); }
+    .step-number { display: inline-block; background: var(--accent); color: white; width: 32px; height: 32px; border-radius: 50%; text-align: center; line-height: 32px; font-weight: 600; margin-bottom: 12px; }
+    .tip { background: var(--panel); border-left: 4px solid var(--accent); padding: 16px; margin: 20px 0; border-radius: 0 8px 8px 0; }
+    .warning { background: #3d2a00; border-left: 4px solid #f5a623; padding: 16px; margin: 20px 0; border-radius: 0 8px 8px 0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="breadcrumb">
+      <a href="/">Главная</a> / <a href="/ssh/tutorial">Руководство по SSH</a>
+    </div>
+    
+    <h1>Как подключиться к серверу по SSH — пошаговое руководство</h1>
+    
+    <p>SSH (Secure Shell) — это протокол для безопасного удалённого управления серверами. В этом руководстве разберём всё: от базового подключения до продвинутых команд Linux.</p>
+    
+    <a href="/login" class="btn">Попробовать SSH онлайн →</a>
+    
+    <h2>Содержание</h2>
+    <ol>
+      <li><a href="#what">Что такое SSH и зачем он нужен</a></li>
+      <li><a href="#connect">Как подключиться к серверу</a></li>
+      <li><a href="#windows">SSH на Windows</a></li>
+      <li><a href="#maclinux">SSH на macOS и Linux</a></li>
+      <li><a href="#mobile">SSH с телефона</a></li>
+      <li><a href="#keys">SSH-ключи вместо пароля</a></li>
+      <li><a href="#commands">Основные команды Linux</a></li>
+      <li><a href="#problems">Решение проблем</a></li>
+    </ol>
+    
+    <h2 id="what">Что такое SSH и зачем он нужен</h2>
+    
+    <p>SSH позволяет подключаться к удалённому серверу и выполнять команды так, будто вы сидите прямо перед ним. Это основной инструмент для:</p>
+    <ul>
+      <li>Администрирования серверов</li>
+      <li>Управления VPS и облачными серверами</li>
+      <li>Развёртывания приложений</li>
+      <li>Работы с базами данных</li>
+      <li>Настройки веб-серверов</li>
+    </ul>
+    
+    <div class="tip">
+      <strong>💡 Важно:</strong> SSH-соединение зашифровано, поэтому данные (включая пароли) нельзя перехватить.
+    </div>
+    
+    <h2 id="connect">Как подключиться к серверу по SSH</h2>
+    
+    <p>Для подключения по SSH вам нужны:</p>
+    <ul>
+      <li><strong>IP-адрес сервера</strong> — например, 192.168.1.100</li>
+      <li><strong>Порт</strong> — по умолчанию 22</li>
+      <li><strong>Логин</strong> — обычно root или созданный пользователь</li>
+      <li><strong>Пароль</strong> — пароль пользователя</li>
+    </ul>
+    
+    <div class="step">
+      <span class="step-number">1</span>
+      <h3>Узнайте данные сервера</h3>
+      <p>IP-адрес и порт SSH можно найти:</p>
+      <ul>
+        <li>В панели управления хостингом (Timeweb, DigitalOcean, AWS)</li>
+        <li>В письме от хостера при заказе VPS</li>
+        <li>У системного администратора</li>
+      </ul>
+    </div>
+    
+    <div class="step">
+      <span class="step-number">2</span>
+      <h3>Подключитесь через WebSSH</h3>
+      <p>Самый простой способ — использовать веб-терминал:</p>
+      <ol>
+        <li>Откройте <a href="/login">webssh.su</a></li>
+        <li>Зарегистрируйтесь или войдите</li>
+        <li>Нажмите «Новое подключение»</li>
+        <li>Введите IP, порт, логин и пароль</li>
+        <li>Нажмите «Подключиться»</li>
+      </ol>
+    </div>
+    
+    <h2 id="windows">SSH на Windows</h2>
+    
+    <h3>Способ 1: Windows PowerShell (Windows 10+)</h3>
+    <p>Нажмите <code>Win + X</code> → Windows PowerShell и введите:</p>
+    <pre>ssh username@192.168.1.100</pre>
+    <p>Замените username на ваш логин и IP на адрес сервера.</p>
+    
+    <h3>Способ 2: PuTTY (Windows 7/8)</h3>
+    <p>Скачайте PuTTY с <a href="https://putty.org" target="_blank">putty.org</a>:</p>
+    <ol>
+      <li>В поле «Host Name» введите IP сервера</li>
+      <li>Port: 22 (или ваш)</li>
+      <li>Connection type: SSH</li>
+      <li>Нажмите «Open»</li>
+    </ol>
+    
+    <h2 id="maclinux">SSH на macOS и Linux</h2>
+    
+    <p>Откройте Terminal и введите:</p>
+    <pre>ssh username@192.168.1.100</pre>
+    <p>Если SSH на нестандартном порту:</p>
+    <pre>ssh -p 2222 username@192.168.1.100</pre>
+    
+    <h2 id="mobile">SSH с телефона</h2>
+    
+    <p>Управлять сервером можно и с телефона:</p>
+    <ul>
+      <li><strong>iOS</strong> — Termius, Prompt</li>
+      <li><strong>Android</strong> — Termius, JuiceSSH</li>
+      <li><strong>Браузер</strong> — <a href="/login">webssh.su</a> (работает на любом устройстве)</li>
+    </ul>
+    
+    <div class="tip">
+      <strong>💡 Совет:</strong> WebSSH работает прямо в браузере — не нужно устанавливать приложения.
+    </div>
+    
+    <h2 id="keys">SSH-ключи вместо пароля</h2>
+    
+    <p>SSH-ключи безопаснее пароля и позволяют входить без ввода пароля.</p>
+    
+    <h3>Создание ключей</h3>
+    <pre># На своём компьютере
+ssh-keygen -t ed25519
+
+# Скопировать ключ на сервер
+ssh-copy-id username@192.168.1.100</pre>
+    
+    <h3>Использование ключей в WebSSH</h3>
+    <ol>
+      <li>При создании подключения выберите «SSH-ключ»</li>
+      <li>Вставьте свой закрытый ключ в поле</li>
+      <li>Подключайтесь без пароля</li>
+    </ol>
+    
+    <h2 id="commands">Основные команды Linux</h2>
+    
+    <h3>Навигация по файлам</h3>
+    <pre>pwd                 # Где я?
+ls -la              # Список файлов
+cd /var/www         # Перейти в папку
+cd ..               # На уровень выше
+cd ~                # Домой</pre>
+    
+    <h3>Создание и удаление</h3>
+    <pre>mkdir folder       # Создать папку
+touch file.txt      # Создать файл
+rm file.txt         # Удалить файл
+rm -rf folder       # Удалить папку</pre>
+    
+    <h3>Редактирование файлов</h3>
+    <pre>nano file.txt      # Редактор nano (простой)
+vim file.txt        # Редактор vim (сложный)
+cat file.txt        # Посмотреть содержимое</pre>
+    
+    <h3>Система</h3>
+    <pre>sudo apt update     # Обновить список пакетов
+sudo apt upgrade    # Обновить пакеты
+sudo systemctl restart nginx  # Перезапустить nginx
+top                 # Процессы</pre>
+    
+    <h3>Сеть</h3>
+    <pre>ping google.com     # Проверить связь
+curl google.com      # HTTP-запрос
+netstat -tulpn      # Открытые порты</pre>
+    
+    <h2 id="problems">Решение проблем</h2>
+    
+    <h3>Connection refused</h3>
+    <p>SSH-сервис не запущен:</p>
+    <pre>sudo systemctl start ssh
+sudo systemctl enable ssh</pre>
+    
+    <h3>Permission denied</h3>
+    <p>Неправильный логин или пароль. Проверьте:</p>
+    <ul>
+      <li>Логин (обычно root)</li>
+      <li>Регистр букв в пароле</li>
+      <li>IP-адрес сервера</li>
+    </ul>
+    
+    <h3>Connection timed out</h3>
+    <p>Сервер недоступен. Проверьте:</p>
+    <ul>
+      <li>Правильный ли IP-адрес</li>
+      <li>Открыт ли порт 22 в файрволе</li>
+      <li>Работает ли сервер</li>
+    </ul>
+    
+    <div class="warning">
+      <strong>⚠️ Файрвол:</strong> Иногда порт 22 заблокирован. Проверьте настройки облачного провайдера (AWS, DigitalOcean и т.д.).
+    </div>
+    
+    <h2>Заключение</h2>
+    
+    <p>SSH — основной инструмент для работы с серверами. Теперь вы знаете, как подключиться к серверу и выполнять базовые команды Linux. Практикуйтесь, и скоро работа с терминалом станет привычной.</p>
+    
+    <a href="/login" class="btn">Начать практику →</a>
+  </div>
+</body>
+</html>

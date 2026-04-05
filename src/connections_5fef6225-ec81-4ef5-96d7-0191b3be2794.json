@@ -1,0 +1,32 @@
+[
+  {
+    "id": "08175dc7-6900-4618-a193-60f5b703cb63",
+    "name": "home",
+    "host": "77.108.192.253",
+    "port": 22,
+    "username": "iaroslav",
+    "authType": "password",
+    "passwordEnc": "enc$icL+zqjjrle9hCOe$7EX80QyLlwtsU/jKmgVTOw==$UuiUb5/rmiQ=",
+    "privateKeyEnc": null
+  },
+  {
+    "id": "27487469-aa66-41eb-93f0-0faa23d731f7",
+    "name": "ВПН",
+    "host": "2.27.43.148",
+    "port": 22,
+    "username": "root",
+    "authType": "password",
+    "passwordEnc": "enc$Grjl68BZy4XvET3X$hef26jq5o+eAgc5CJ6qxlg==$r8ormVayzDYHGL9nuw==",
+    "privateKeyEnc": null
+  },
+  {
+    "id": "88d5a07b-0c2f-48c9-94d1-074d41f83921",
+    "name": "Webssh",
+    "host": "2.26.97.160",
+    "port": 22,
+    "username": "root",
+    "authType": "password",
+    "passwordEnc": "enc$z8zRT90KxJhO9V+V$9CC2I28+DdT5MMAbc1M+Xw==$I00vlJaUMsdMFpE=",
+    "privateKeyEnc": null
+  }
+]

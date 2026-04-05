@@ -1,0 +1,20 @@
+[
+  {
+    "id": "8e275e66-743e-4e3c-8903-62854747ce50",
+    "name": "Home",
+    "host": "77.108.192.253",
+    "port": 22,
+    "username": "iaroslav",
+    "password": "iaroslav",
+    "authType": "password"
+  },
+  {
+    "id": "ba336912-3b33-48c3-b52c-1958594cabee",
+    "name": "лаосшвкги]",
+    "host": "77.108.192.253",
+    "port": 22,
+    "username": "iaroslav",
+    "password": "iaroslav",
+    "authType": "password"
+  }
+]

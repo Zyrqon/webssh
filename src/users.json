@@ -1,0 +1,38 @@
+[
+  {
+    "id": "5fef6225-ec81-4ef5-96d7-0191b3be2794",
+    "username": "admin",
+    "created": "2026-04-01T14:29:07.407Z",
+    "totpSecret": "B433DNTUYINQNAYV",
+    "passwordHash": "scrypt$6M3vQkOJJBroTafZptSwyw==$LH6oNNUMs0TeTGIgevkjdFDsSxk96ip/JbcXDE4HofMCiBKNex0u0j/3f1p42Rj1LHC8jg2EqoFmGC1dFe3fhw==",
+    "totpPendingSecret": null
+  },
+  {
+    "id": "171c4290-be11-4d2c-ad53-b869f51e5cc7",
+    "username": "AppEzhik",
+    "passwordHash": "scrypt$q7Vh3F6h7jvuad51JBFdzA==$zIN0wdA1Q84I9GoD3Q9tAXQZZwXYGEbytCkp70XyCbE/JmTryydq2zwfb6slMA/2tWDx+GSvGMdYmwqdgDKo9g==",
+    "totpSecret": null,
+    "created": "2026-04-02T08:36:13.796Z"
+  },
+  {
+    "id": "1f4965e7-d077-4b00-a7f5-03d0162fa34f",
+    "username": "test",
+    "passwordHash": "scrypt$O8ZfwDqpY2ymCXonXLndoQ==$RYu0yw62BxE4pvblC19Q4U0FVNorVmEYv/OmFJVaqy+sfYskzm67MmOQzYzC/fqYIF6qwiQdqHMbPh1qQp327w==",
+    "totpSecret": "J7FR2VDREJQDX3WL",
+    "created": "2026-04-02T12:36:23.788Z"
+  },
+  {
+    "id": "0a5cfc16-4d35-4963-992c-c7b29598d68d",
+    "username": "nigger",
+    "passwordHash": "scrypt$ZvV4ltf8q6IyrSMQ2NwwsQ==$1D5SsQjfBX09cdB5yPtMq5HPZObM/avwlqsj2a5AELL+rX33xA3TYvSFFi7jTqgIT0y7zR+zTe0l6tQhwc4Pig==",
+    "totpSecret": null,
+    "created": "2026-04-05T06:26:49.052Z"
+  },
+  {
+    "id": "37b96d14-9d2c-41eb-b9d4-07a3759824c2",
+    "username": "darksolar",
+    "passwordHash": "scrypt$+N8OAalNJTNW7MzfXj9Jyw==$jOu/q/tHBk6nVJ+NTaz2aufBMGyrEvyktGtmjMseUantjmZRA6CxLbAz5DJ5VTgcpARQoaoTkicn9FzrLiog2g==",
+    "totpSecret": null,
+    "created": "2026-04-05T11:23:38.253Z"
+  }
+]

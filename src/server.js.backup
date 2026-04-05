@@ -1,0 +1,1027 @@
+const express = require('express');
+const { Client } = require('ssh2');
+const WebSocket = require('ws');
+const fs = require('fs');
+const path = require('path');
+const { v4: uuidv4, validate: uuidValidate } = require('uuid');
+const crypto = require('crypto');
+const QRCode = require('qrcode');
+const rateLimit = require('express-rate-limit');
+const helmet = require('helmet');
+const cookieParser = require('cookie-parser');
+const csrf = require('csurf');
+const session = require('express-session');
+const ipaddr = require('ipaddr.js');
+const validator = require('validator');
+const xss = require('xss');
+const { authenticator } = require('otplib');
+const LRU = require('lru-cache');
+const winston = require('winston');
+
+const MIN_PASSWORD_LENGTH = 12;
+const MAX_REQUEST_SIZE = '100kb';
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: { error: 'Слишком много запросов. Попробуйте позже.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: 'Слишком много попыток входа. Попробуйте позже.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const loginAttempts = new Map();
+
+function getLoginAttempts(userId) {
+  return loginAttempts.get(userId) || { count: 0, lockedUntil: 0 };
+}
+
+function incrementLoginAttempts(userId) {
+  const attempts = getLoginAttempts(userId);
+  attempts.count++;
+  if (attempts.count >= 5) {
+    attempts.lockedUntil = Date.now() + 15 * 60 * 1000;
+  }
+  loginAttempts.set(userId, attempts);
+}
+
+function clearLoginAttempts(userId) {
+  loginAttempts.delete(userId);
+}
+
+function parseCookies(cookieHeader) {
+  const result = {};
+  if (!cookieHeader) return result;
+  const parts = cookieHeader.split(';');
+  for (const part of parts) {
+    const idx = part.indexOf('=');
+    if (idx === -1) continue;
+    const key = part.slice(0, idx).trim();
+    const value = part.slice(idx + 1).trim();
+    if (!key) continue;
+    result[key] = decodeURIComponent(value);
+  }
+  return result;
+}
+
+function setCookie(res, name, value, opts = {}) {
+  const parts = [];
+  parts.push(`${name}=${encodeURIComponent(value)}`);
+  parts.push(`Path=${opts.path || '/'}`);
+  if (opts.httpOnly) parts.push('HttpOnly');
+  if (opts.secure) parts.push('Secure');
+  parts.push(`SameSite=${opts.sameSite || 'Lax'}`);
+  if (typeof opts.maxAgeSeconds === 'number') parts.push(`Max-Age=${Math.floor(opts.maxAgeSeconds)}`);
+  if (opts.expires) parts.push(`Expires=${opts.expires.toUTCString()}`);
+
+  const existing = res.getHeader('Set-Cookie');
+  const next = Array.isArray(existing) ? existing.concat(parts.join('; ')) : (existing ? [existing, parts.join('; ')] : parts.join('; '));
+  res.setHeader('Set-Cookie', next);
+}
+
+function clearCookie(res, name) {
+  setCookie(res, name, '', { path: '/', httpOnly: true, sameSite: 'Lax', expires: new Date(0) });
+}
+
+function randomToken(bytes = 32) {
+  return crypto.randomBytes(bytes).toString('base64url');
+}
+
+function hashPasswordScrypt(password) {
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.scryptSync(password, salt, 64);
+  return `scrypt$${salt.toString('base64')}$${hash.toString('base64')}`;
+}
+
+function verifyPassword(user, password) {
+  if (user.passwordHash && typeof user.passwordHash === 'string') {
+    const parts = user.passwordHash.split('$');
+    if (parts.length === 3 && parts[0] === 'scrypt') {
+      const salt = Buffer.from(parts[1], 'base64');
+      const expected = Buffer.from(parts[2], 'base64');
+      const actual = crypto.scryptSync(password, salt, expected.length);
+      return crypto.timingSafeEqual(expected, actual);
+    }
+  }
+
+  if (user.password && typeof user.password === 'string') {
+    const legacy = crypto.createHash('sha256').update(password).digest('hex');
+    return legacy === user.password;
+  }
+
+  return false;
+}
+
+function generateTOTPSecret() {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let secret = '';
+  for (let i = 0; i < 16; i++) {
+    secret += alphabet[Math.floor(Math.random() * 32)];
+  }
+  return secret;
+}
+
+function generateTOTPUri(secret, account) {
+  const label = encodeURIComponent(account);
+  return `otpauth://totp/WebSSH:${label}?secret=${secret}&issuer=WebSSH`;
+}
+
+function base32ToBuf(base32) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = '';
+  for (const char of base32.toUpperCase()) {
+    const idx = alphabet.indexOf(char);
+    if (idx === -1) continue;
+    bits += idx.toString(2).padStart(5, '0');
+  }
+  const bytes = [];
+  for (let i = 0; i + 8 <= bits.length; i += 8) {
+    bytes.push(parseInt(bits.slice(i, i + 8), 2));
+  }
+  return Buffer.from(bytes);
+}
+
+function generateTOTP(secret, offset = 0) {
+  const epoch = Math.floor(Date.now() / 1000) + (offset * 30);
+  const timeStep = Math.floor(epoch / 30);
+  const buffer = Buffer.alloc(8);
+  buffer.writeBigUInt64BE(BigInt(timeStep));
+  
+  const hmac = crypto.createHmac('sha1', base32ToBuf(secret));
+  const hash = hmac.update(buffer).digest();
+  const off = hash[hash.length - 1] & 0xf;
+  const code = ((hash[off] & 0x7f) << 24 | 
+                (hash[off + 1] & 0xff) << 16 | 
+                (hash[off + 2] & 0xff) << 8 | 
+                (hash[off + 3] & 0xff)) % 1000000;
+  return code.toString().padStart(6, '0');
+}
+
+function verifyTOTP(secret, token) {
+  for (let i = -1; i <= 1; i++) {
+    if (generateTOTP(secret, i) === token) return true;
+  }
+  return false;
+}
+
+const app = express();
+const PORT = Number.parseInt(process.env.PORT || '3000', 10);
+const HOST = process.env.HOST || '127.0.0.1';
+const USERS_FILE = path.join(__dirname, 'users.json');
+const SESSION_COOKIE = 'webssh_session';
+const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
+const SESSIONS_FILE = path.join(__dirname, 'sessions.json');
+const MASTER_KEY_FILE = path.join(__dirname, '.webssh_secret');
+const AUDIT_LOG_FILE = path.join(__dirname, 'audit.log');
+
+const sessions = new Map();
+const loginChallenges = new Map();
+const LOGIN_CHALLENGES_FILE = path.join(__dirname, 'login_challenges.json');
+
+function sanitizeInput(str, maxLength = 255) {
+  if (typeof str !== 'string') return '';
+  return str.trim().slice(0, maxLength).replace(/[<>'"]/g, '');
+}
+
+function auditLog(action, userId, details = {}) {
+  const entry = {
+    timestamp: new Date().toISOString(),
+    action,
+    userId,
+    ...details
+  };
+  try {
+    fs.appendFileSync(AUDIT_LOG_FILE, JSON.stringify(entry) + '\n');
+  } catch (_) {}
+}
+
+function getMasterKey() {
+  let secret = process.env.WEBSSH_SECRET;
+  if (!secret) {
+    if (fs.existsSync(MASTER_KEY_FILE)) {
+      secret = fs.readFileSync(MASTER_KEY_FILE, 'utf8').trim();
+    } else {
+      secret = randomToken(48);
+      try {
+        fs.writeFileSync(MASTER_KEY_FILE, secret + '\n', { mode: 0o600 });
+      } catch (_) {
+        fs.writeFileSync(MASTER_KEY_FILE, secret + '\n');
+      }
+    }
+  }
+  return crypto.createHash('sha256').update(secret, 'utf8').digest(); // 32 bytes
+}
+
+const MASTER_KEY = getMasterKey();
+
+function encryptSecret(plainText) {
+  if (plainText == null) return null;
+  const text = String(plainText);
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', MASTER_KEY, iv);
+  const enc = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `enc$${iv.toString('base64')}$${tag.toString('base64')}$${enc.toString('base64')}`;
+}
+
+function decryptSecret(payload) {
+  if (!payload) return null;
+  if (typeof payload !== 'string') return null;
+  if (!payload.startsWith('enc$')) return payload; // legacy/plain
+  const parts = payload.split('$');
+  if (parts.length !== 4) return null;
+  const iv = Buffer.from(parts[1], 'base64');
+  const tag = Buffer.from(parts[2], 'base64');
+  const data = Buffer.from(parts[3], 'base64');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', MASTER_KEY, iv);
+  decipher.setAuthTag(tag);
+  const plain = Buffer.concat([decipher.update(data), decipher.final()]);
+  return plain.toString('utf8');
+}
+
+function loadSessionsFromDisk() {
+  if (!fs.existsSync(SESSIONS_FILE)) return;
+  try {
+    const raw = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf8'));
+    if (!Array.isArray(raw)) return;
+    for (const s of raw) {
+      if (!s || typeof s !== 'object') continue;
+      if (!s.id || !s.userId || typeof s.expiresAtMs !== 'number') continue;
+      sessions.set(s.id, { userId: s.userId, expiresAtMs: s.expiresAtMs });
+    }
+  } catch (_) {}
+}
+
+function saveSessionsToDisk() {
+  try {
+    const data = [];
+    for (const [id, s] of sessions) data.push({ id, userId: s.userId, expiresAtMs: s.expiresAtMs });
+    try {
+      fs.writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
+    } catch (_) {
+      fs.writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2));
+    }
+  } catch (_) {}
+}
+
+loadSessionsFromDisk();
+
+function loadLoginChallengesFromDisk() {
+  if (!fs.existsSync(LOGIN_CHALLENGES_FILE)) return;
+  try {
+    const raw = JSON.parse(fs.readFileSync(LOGIN_CHALLENGES_FILE, 'utf8'));
+    if (!Array.isArray(raw)) return;
+    for (const c of raw) {
+      if (!c || typeof c !== 'object') continue;
+      if (!c.id || !c.userId || typeof c.expiresAtMs !== 'number') continue;
+      loginChallenges.set(c.id, { userId: c.userId, expiresAtMs: c.expiresAtMs });
+    }
+  } catch (_) {}
+}
+
+function saveLoginChallengesToDisk() {
+  try {
+    const data = [];
+    for (const [id, c] of loginChallenges) data.push({ id, userId: c.userId, expiresAtMs: c.expiresAtMs });
+    fs.writeFileSync(LOGIN_CHALLENGES_FILE, JSON.stringify(data, null, 2));
+  } catch (_) {}
+}
+
+loadLoginChallengesFromDisk();
+
+function cleanupMaps() {
+  const now = Date.now();
+  let sessionsChanged = false;
+  for (const [k, v] of sessions) {
+    if (!v || v.expiresAtMs <= now) {
+      sessions.delete(k);
+      sessionsChanged = true;
+    }
+  }
+  let challengesChanged = false;
+  for (const [k, v] of loginChallenges) {
+    if (!v || v.expiresAtMs <= now) {
+      loginChallenges.delete(k);
+      challengesChanged = true;
+    }
+  }
+  if (sessionsChanged) saveSessionsToDisk();
+  if (challengesChanged) saveLoginChallengesToDisk();
+}
+
+setInterval(cleanupMaps, 60_000).unref?.();
+
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", 'data:'],
+      connectSrc: ["'self'"],
+      upgradeInsecureRequests: []
+    }
+  },
+  crossOriginEmbedderPolicy: false
+}));
+
+app.use(express.json({ limit: MAX_REQUEST_SIZE }));
+app.use(express.static(path.join(__dirname, '..', 'public')));
+
+function loadUsers() {
+  if (!fs.existsSync(USERS_FILE)) {
+    const defaultUsers = [{
+      id: uuidv4(),
+      username: 'admin',
+      passwordHash: hashPasswordScrypt('admin'),
+      totpSecret: null,
+      created: new Date().toISOString()
+    }];
+    fs.writeFileSync(USERS_FILE, JSON.stringify(defaultUsers, null, 2));
+    return defaultUsers;
+  }
+  return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
+}
+
+function saveUsers(users) {
+  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+}
+
+function loadConnections(userId) {
+  const file = path.join(__dirname, `connections_${userId}.json`);
+  if (!fs.existsSync(file)) return [];
+  let connections = JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (!Array.isArray(connections)) connections = [];
+
+  // Migration:
+  // - legacy plaintext `password` / `privateKey` -> encrypted fields
+  // - keep compatibility with already-encrypted fields
+  let changed = false;
+  const migrated = connections.map((c) => {
+    if (!c || typeof c !== 'object') return c;
+    const next = { ...c };
+    if (typeof next.password === 'string' && !next.passwordEnc) {
+      next.passwordEnc = encryptSecret(next.password);
+      delete next.password;
+      changed = true;
+    }
+    if (typeof next.privateKey === 'string' && !next.privateKeyEnc) {
+      next.privateKeyEnc = encryptSecret(next.privateKey);
+      delete next.privateKey;
+      changed = true;
+    }
+    return next;
+  });
+  if (changed) {
+    try {
+      fs.writeFileSync(file, JSON.stringify(migrated, null, 2));
+    } catch (_) {}
+  }
+  return migrated;
+}
+
+function saveConnections(userId, connections) {
+  const file = path.join(__dirname, `connections_${userId}.json`);
+  fs.writeFileSync(file, JSON.stringify(connections, null, 2));
+}
+
+function getSessionUserId(req) {
+  const cookies = parseCookies(req.headers.cookie);
+  const sessionId = cookies[SESSION_COOKIE];
+  if (!sessionId) return null;
+  const session = sessions.get(sessionId);
+  if (!session) return null;
+  if (session.expiresAtMs <= Date.now()) {
+    sessions.delete(sessionId);
+    return null;
+  }
+  return session.userId;
+}
+
+function requireAuth(req, res, next) {
+  const userId = getSessionUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Требуется авторизация' });
+  req.userId = userId;
+  next();
+}
+
+function createSession(res, userId, req) {
+  const cookies = parseCookies(req?.headers?.cookie);
+  const oldSessionId = cookies[SESSION_COOKIE];
+  if (oldSessionId) {
+    sessions.delete(oldSessionId);
+  }
+  
+  const sessionId = randomToken(32);
+  sessions.set(sessionId, { userId, expiresAtMs: Date.now() + SESSION_TTL_SECONDS * 1000 });
+  saveSessionsToDisk();
+  const secure = req?.socket?.encrypted === true || process.env.WEBSSH_COOKIE_SECURE === '1';
+  setCookie(res, SESSION_COOKIE, sessionId, {
+    path: '/',
+    httpOnly: true,
+    secure,
+    sameSite: 'Lax',
+    maxAgeSeconds: SESSION_TTL_SECONDS
+  });
+}
+
+const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+
+app.get('/', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
+app.get('/login', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'login.html')));
+app.get('/connect', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'client.html')));
+
+// Backward compatible URLs
+app.get('/login.html', (req, res) => res.redirect(302, '/login'));
+app.get('/client.html', (req, res) => res.redirect(302, '/connect'));
+
+app.post('/api/register', (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Fill all fields' });
+  }
+  if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
+    return res.status(400).json({ error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` });
+  }
+  
+  const users = loadUsers();
+  if (users.find(u => u.username.toLowerCase() === username.toLowerCase())) {
+    return res.status(400).json({ error: 'Username already taken' });
+  }
+  
+  const newUser = {
+    id: uuidv4(),
+    username,
+    passwordHash: hashPasswordScrypt(password),
+    totpSecret: null,
+    created: new Date().toISOString()
+  };
+  users.push(newUser);
+  saveUsers(users);
+  
+  saveConnections(newUser.id, []);
+  
+  createSession(res, newUser.id, req);
+  res.json({ username: newUser.username });
+});
+
+app.use('/api/', apiLimiter);
+
+app.post('/api/check-username', (req, res) => {
+  const { username } = req.body;
+  if (!username) return res.json({ available: false });
+  const users = loadUsers();
+  const available = !users.find(u => u.username.toLowerCase() === username.toLowerCase());
+  res.json({ available });
+});
+
+app.post('/api/register-with-2fa', (req, res) => {
+  const { username, password, code, secret } = req.body;
+  if (!username || !password || !code || !secret) {
+    return res.status(400).json({ error: 'Не все поля заполнены' });
+  }
+  if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
+    return res.status(400).json({ error: `Минимальная длина пароля — ${MIN_PASSWORD_LENGTH} символов` });
+  }
+  
+  const users = loadUsers();
+  if (users.find(u => u.username.toLowerCase() === username.toLowerCase())) {
+    return res.status(400).json({ error: 'Такое имя пользователя уже занято' });
+  }
+  
+  const isValid = verifyTOTP(secret, code);
+  
+  if (!isValid) {
+    return res.status(401).json({ error: 'Неверный код' });
+  }
+  
+  const newUser = {
+    id: uuidv4(),
+    username,
+    passwordHash: hashPasswordScrypt(password),
+    totpSecret: secret,
+    created: new Date().toISOString()
+  };
+  users.push(newUser);
+  saveUsers(users);
+  
+  saveConnections(newUser.id, []);
+  
+  createSession(res, newUser.id, req);
+  res.json({ username: newUser.username });
+});
+
+app.post('/api/login', loginLimiter, (req, res) => {
+  const { username, password } = req.body;
+  const users = loadUsers();
+  const user = users.find(u => u.username.toLowerCase() === username.toLowerCase());
+  
+  if (!user || !verifyPassword(user, password)) {
+    if (user) {
+      incrementLoginAttempts(user.id);
+      auditLog('login_failed', user.id, { username, reason: 'invalid_password' });
+    }
+    return res.status(401).json({ error: 'Неверный логин или пароль' });
+  }
+
+  const attempts = getLoginAttempts(user.id);
+  if (attempts.lockedUntil > Date.now()) {
+    return res.status(429).json({ error: 'Аккаунт заблокирован. Попробуйте позже.' });
+  }
+  
+  if (user.password && !user.passwordHash) {
+    user.passwordHash = hashPasswordScrypt(password);
+    delete user.password;
+    saveUsers(users);
+  }
+  
+  if (user.totpSecret) {
+    const challenge = randomToken(24);
+    loginChallenges.set(challenge, { userId: user.id, expiresAtMs: Date.now() + 5 * 60 * 1000 });
+    saveLoginChallengesToDisk();
+    return res.json({ requires2fa: true, challenge });
+  }
+  
+  clearLoginAttempts(user.id);
+  createSession(res, user.id, req);
+  auditLog('login_success', user.id, { username: user.username });
+  res.json({ username: user.username });
+});
+
+app.post('/api/login-2fa', loginLimiter, (req, res) => {
+  const { challenge, code } = req.body;
+  if (!challenge || !code) return res.status(400).json({ error: 'Не все поля заполнены' });
+  
+  const users = loadUsers();
+  const ch = loginChallenges.get(challenge);
+  if (!ch || ch.expiresAtMs <= Date.now()) return res.status(401).json({ error: 'Сессия входа истекла. Войдите заново.' });
+  const user = users.find(u => u.id === ch.userId);
+  if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
+  
+  if (!user.totpSecret) return res.status(400).json({ error: 'Двухфакторная аутентификация не настроена' });
+  
+  const isValid = verifyTOTP(user.totpSecret, code);
+  if (!isValid) {
+    incrementLoginAttempts(user.id);
+    auditLog('login_2fa_failed', user.id, { challenge });
+    return res.status(401).json({ error: 'Неверный код' });
+  }
+  
+  clearLoginAttempts(user.id);
+  loginChallenges.delete(challenge);
+  saveLoginChallengesToDisk();
+  createSession(res, user.id, req);
+  auditLog('login_2fa_success', user.id, {});
+  res.json({ username: user.username });
+});
+
+app.post('/api/logout', (req, res) => {
+  const userId = getSessionUserId(req);
+  const cookies = parseCookies(req.headers.cookie);
+  const sessionId = cookies[SESSION_COOKIE];
+  if (sessionId) {
+    sessions.delete(sessionId);
+    saveSessionsToDisk();
+    auditLog('logout', userId, {});
+  }
+  clearCookie(res, SESSION_COOKIE);
+  res.json({ success: true });
+});
+
+app.post('/api/setup-2fa', async (req, res) => {
+  const userId = getSessionUserId(req);
+  if (!userId) {
+    const username = req.body.username;
+    if (!username) return res.status(400).json({ error: 'Укажите имя пользователя' });
+    
+    const secret = generateTOTPSecret();
+    const otpauth = generateTOTPUri(secret, username);
+    const qrCodeDataUrl = await QRCode.toDataURL(otpauth);
+    
+    return res.json({ secret, qrCode: qrCodeDataUrl });
+  }
+  
+  const users = loadUsers();
+  const idx = users.findIndex(u => u.id === userId);
+  if (idx === -1) return res.status(404).json({ error: 'Пользователь не найден' });
+  
+  if (users[idx].totpSecret) {
+    return res.status(400).json({ error: '2FA уже включена. Отключите её, чтобы настроить заново.' });
+  }
+  
+  const secret = generateTOTPSecret();
+  users[idx].totpPendingSecret = secret;
+  saveUsers(users);
+  
+  const otpauth = generateTOTPUri(secret, users[idx].username);
+  const qrCodeDataUrl = await QRCode.toDataURL(otpauth);
+  
+  res.json({ qrCode: qrCodeDataUrl });
+});
+
+app.post('/api/verify-2fa', (req, res) => {
+  const userId = getSessionUserId(req);
+  const { code } = req.body;
+  if (!userId || !code) return res.status(400).json({ error: 'Не все поля заполнены' });
+  
+  const users = loadUsers();
+  const idx = users.findIndex(u => u.id === userId);
+  if (idx === -1) return res.status(404).json({ error: 'Пользователь не найден' });
+  
+  const user = users[idx];
+  
+  if (user.totpPendingSecret) {
+    if (!verifyTOTP(user.totpPendingSecret, code)) {
+      return res.status(401).json({ error: 'Неверный код' });
+    }
+    user.totpSecret = user.totpPendingSecret;
+    user.totpPendingSecret = null;
+    saveUsers(users);
+    return res.json({ success: true });
+  }
+  
+  if (!user.totpSecret) {
+    return res.status(400).json({ error: 'Сначала начните настройку 2FA в профиле' });
+  }
+  
+  if (!verifyTOTP(user.totpSecret, code)) return res.status(401).json({ error: 'Неверный код' });
+  
+  res.json({ success: true });
+});
+
+app.post('/api/verify-2fa-temp', (req, res) => {
+  const { code, secret } = req.body;
+  if (!code || !secret) return res.status(400).json({ error: 'Missing fields' });
+  if (!verifyTOTP(secret, code)) return res.status(401).json({ error: 'Invalid code' });
+  res.json({ success: true });
+});
+
+app.post('/api/enable-2fa', requireAuth, (req, res) => {
+  const { secret, code } = req.body;
+  if (!secret || !code) return res.status(400).json({ error: 'Missing fields' });
+  
+  if (!verifyTOTP(secret, code)) {
+    return res.status(401).json({ error: 'Invalid code' });
+  }
+  
+  const users = loadUsers();
+  const idx = users.findIndex(u => u.id === req.userId);
+  if (idx === -1) return res.status(404).json({ error: 'User not found' });
+  
+  users[idx].totpSecret = secret;
+  saveUsers(users);
+  res.json({ success: true });
+});
+
+app.post('/api/disable-2fa', (req, res) => {
+  const userId = getSessionUserId(req);
+  const { password } = req.body;
+  if (!userId || !password) return res.status(400).json({ error: 'Не все поля заполнены' });
+  
+  const users = loadUsers();
+  const idx = users.findIndex(u => u.id === userId);
+  if (idx === -1) return res.status(404).json({ error: 'Пользователь не найден' });
+  
+  if (!verifyPassword(users[idx], password)) {
+    return res.status(401).json({ error: 'Неверный пароль' });
+  }
+
+  if (users[idx].password && !users[idx].passwordHash) {
+    users[idx].passwordHash = hashPasswordScrypt(password);
+    delete users[idx].password;
+  }
+  
+  users[idx].totpSecret = null;
+  users[idx].totpPendingSecret = null;
+  saveUsers(users);
+  
+  res.json({ success: true });
+});
+
+app.post('/api/delete-account', (req, res) => {
+  const userId = getSessionUserId(req);
+  const { password } = req.body;
+  if (!userId || !password) return res.status(400).json({ error: 'Не все поля заполнены' });
+  
+  const users = loadUsers();
+  const idx = users.findIndex(u => u.id === userId);
+  if (idx === -1) return res.status(404).json({ error: 'Пользователь не найден' });
+  
+  if (!verifyPassword(users[idx], password)) {
+    return res.status(401).json({ error: 'Неверный пароль' });
+  }
+
+  if (users[idx].password && !users[idx].passwordHash) {
+    users[idx].passwordHash = hashPasswordScrypt(password);
+    delete users[idx].password;
+  }
+  
+  const userConnectionsFile = path.join(__dirname, `connections_${userId}.json`);
+  if (fs.existsSync(userConnectionsFile)) {
+    fs.unlinkSync(userConnectionsFile);
+  }
+  
+  users.splice(idx, 1);
+  saveUsers(users);
+  
+  res.json({ success: true });
+});
+
+app.get('/api/me', requireAuth, (req, res) => {
+  const users = loadUsers();
+  const user = users.find(u => u.id === req.userId);
+  if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
+  res.json({ username: user.username });
+});
+
+app.get('/api/connections', requireAuth, (req, res) => {
+  const userId = req.userId;
+  
+  const connections = loadConnections(userId);
+  res.json(connections.map((c) => {
+    if (!c || typeof c !== 'object') return c;
+    const { passwordEnc, privateKeyEnc, password, privateKey, ...rest } = c;
+    return rest;
+  }));
+});
+
+app.get('/api/connections/:id', requireAuth, (req, res) => {
+  const userId = req.userId;
+  const connections = loadConnections(userId);
+  const conn = connections.find(c => c && c.id === req.params.id);
+  if (!conn) return res.status(404).json({ error: 'Не найдено' });
+  
+  const { passwordEnc, privateKeyEnc, ...rest } = conn;
+  const result = { ...rest };
+  
+  if (conn.privateKeyEnc) {
+    result.privateKey = decryptSecret(conn.privateKeyEnc);
+  }
+  if (conn.passwordEnc) {
+    result.password = decryptSecret(conn.passwordEnc);
+  }
+  
+  res.json(result);
+});
+
+app.post('/api/connections', requireAuth, (req, res) => {
+  const userId = req.userId;
+  
+  const connections = loadConnections(userId);
+  const newConnection = {
+    id: uuidv4(),
+    name: req.body.name,
+    host: req.body.host,
+    port: req.body.port || 22,
+    username: req.body.username,
+    authType: req.body.authType || 'password',
+    passwordEnc: req.body.password ? encryptSecret(req.body.password) : null,
+    privateKeyEnc: req.body.privateKey ? encryptSecret(req.body.privateKey) : null
+  };
+  if (newConnection.authType === 'key') newConnection.passwordEnc = null;
+  if (newConnection.authType !== 'key') newConnection.privateKeyEnc = null;
+  connections.push(newConnection);
+  saveConnections(userId, connections);
+  const { passwordEnc, privateKeyEnc, ...publicConn } = newConnection;
+  res.json(publicConn);
+});
+
+app.put('/api/connections/:id', (req, res) => {
+  const userId = getSessionUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Требуется авторизация' });
+  
+  let connections = loadConnections(userId);
+  const idx = connections.findIndex(c => c.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'Не найдено' });
+  
+  const prev = connections[idx];
+  const nextAuthType = req.body.authType || prev.authType || 'password';
+
+  connections[idx] = {
+    ...prev,
+    name: req.body.name,
+    host: req.body.host,
+    port: req.body.port || 22,
+    username: req.body.username,
+    authType: nextAuthType
+  };
+  if (nextAuthType === 'key') {
+    if (req.body.privateKey) connections[idx].privateKeyEnc = encryptSecret(req.body.privateKey);
+    connections[idx].passwordEnc = null;
+  } else {
+    if (req.body.password) connections[idx].passwordEnc = encryptSecret(req.body.password);
+    connections[idx].privateKeyEnc = null;
+  }
+  saveConnections(userId, connections);
+  const { passwordEnc, privateKeyEnc, ...publicConn } = connections[idx];
+  res.json(publicConn);
+});
+
+app.delete('/api/connections/:id', (req, res) => {
+  const userId = getSessionUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Требуется авторизация' });
+  
+  let connections = loadConnections(userId);
+  connections = connections.filter(c => c.id !== req.params.id);
+  saveConnections(userId, connections);
+  res.json({ success: true });
+});
+
+app.post('/api/update-profile', (req, res) => {
+  const userId = getSessionUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Требуется авторизация' });
+  
+  const { username, currentPassword, newPassword } = req.body;
+  if (!currentPassword) return res.status(400).json({ error: 'Введите текущий пароль' });
+  
+  const users = loadUsers();
+  const idx = users.findIndex(u => u.id === userId);
+  if (idx === -1) return res.status(404).json({ error: 'Пользователь не найден' });
+  
+  const user = users[idx];
+  if (!verifyPassword(user, currentPassword)) {
+    return res.status(401).json({ error: 'Неверный пароль' });
+  }
+
+  if (user.password && !user.passwordHash) {
+    user.passwordHash = hashPasswordScrypt(currentPassword);
+    delete user.password;
+  }
+  
+  if (username && username.toLowerCase() !== user.username.toLowerCase()) {
+    if (users.find(u => u.username.toLowerCase() === username.toLowerCase())) {
+      return res.status(400).json({ error: 'Такое имя пользователя уже занято' });
+    }
+    user.username = username;
+  }
+  
+  if (newPassword) {
+    user.passwordHash = hashPasswordScrypt(newPassword);
+  }
+  
+  users[idx] = user;
+  saveUsers(users);
+  
+  res.json({ success: true, username: user.username });
+});
+
+app.get('/api/user', async (req, res) => {
+  const userId = getSessionUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Требуется авторизация' });
+  
+  const users = loadUsers();
+  const user = users.find(u => u.id === userId);
+  if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
+  
+  const payload = {
+    id: user.id,
+    username: user.username,
+    twoFactorEnabled: !!user.totpSecret,
+    twoFactorPending: !!user.totpPendingSecret
+  };
+  
+  if (user.totpPendingSecret) {
+    const otpauth = generateTOTPUri(user.totpPendingSecret, user.username);
+    try {
+      payload.pending2faQr = await QRCode.toDataURL(otpauth);
+    } catch (e) {
+      console.error('QR 2FA:', e);
+    }
+  }
+  
+  res.json(payload);
+});
+
+const server = app.listen(PORT, HOST, () => {
+  const displayHost = HOST === '0.0.0.0' ? 'localhost' : HOST;
+  console.log(`Сервер WebSSH: http://${displayHost}:${PORT}`);
+});
+
+server.on('error', (err) => {
+  console.error('HTTP listen error:', err);
+});
+
+const wss = new WebSocket.Server({ server, path: '/ws' });
+wss.on('error', (err) => {
+  console.error('WebSocket server error:', err);
+});
+
+wss.on('connection', (ws, req) => {
+  const userId = getSessionUserId(req);
+  if (!userId) {
+    try { ws.close(1008, 'auth required'); } catch (_) {}
+    return;
+  }
+
+  // Basic same-origin check for browsers
+  const origin = req.headers.origin;
+  if (origin) {
+    try {
+      const o = new URL(origin);
+      const host = (req.headers.host || '').split(',')[0].trim();
+      if (o.host !== host) {
+        ws.close(1008, 'bad origin');
+        return;
+      }
+    } catch (_) {}
+  }
+
+  const client = new Client();
+  let sshStream = null;
+
+  ws.on('message', (message) => {
+    try {
+      const data = JSON.parse(message);
+      
+      if (data.type === 'connect') {
+        const { connectionId } = data;
+        if (!connectionId) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Не указан connectionId' }));
+          return;
+        }
+
+        const connections = loadConnections(userId);
+        const conn = connections.find((c) => c && c.id === connectionId);
+        if (!conn) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Подключение не найдено' }));
+          return;
+        }
+        
+        const connectConfig = {
+          host: conn.host,
+          port: conn.port || 22,
+          username: conn.username,
+          readyTimeout: 10000
+        };
+
+        if (conn.authType === 'key') {
+          const privateKey = decryptSecret(conn.privateKeyEnc);
+          if (!privateKey) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Для этого подключения не задан приватный ключ' }));
+            return;
+          }
+          connectConfig.privateKey = privateKey;
+        } else {
+          const password = decryptSecret(conn.passwordEnc);
+          if (!password) {
+            ws.send(JSON.stringify({ type: 'error', message: 'Для этого подключения не задан пароль' }));
+            return;
+          }
+          connectConfig.password = password;
+        }
+
+        client.connect(connectConfig);
+      } 
+      else if (data.type === 'data' && sshStream) {
+        sshStream.write(data.data);
+      }
+      else if (data.type === 'resize' && sshStream) {
+        sshStream.setWindow(data.rows, data.cols, data.height, data.width);
+      }
+      else if (data.type === 'disconnect') {
+        sshStream?.end();
+        client.end();
+      }
+    } catch (e) {
+      console.error('Ошибка обработки сообщения:', e);
+    }
+  });
+
+  client.on('ready', () => {
+    ws.send(JSON.stringify({ type: 'ready' }));
+    
+    client.shell({ term: 'xterm-256color' }, (err, stream) => {
+      if (err) {
+        ws.send(JSON.stringify({ type: 'error', message: err.message }));
+        return;
+      }
+
+      sshStream = stream;
+      
+      stream.on('data', (data) => {
+        ws.send(JSON.stringify({ type: 'data', data: data.toString('utf8') }));
+      });
+
+      stream.on('close', () => {
+        ws.send(JSON.stringify({ type: 'close' }));
+        client.end();
+      });
+    });
+  });
+
+  client.on('error', (err) => {
+    ws.send(JSON.stringify({ type: 'error', message: err.message }));
+  });
+
+  ws.on('close', () => {
+    sshStream?.end();
+    client.end();
+  });
+});

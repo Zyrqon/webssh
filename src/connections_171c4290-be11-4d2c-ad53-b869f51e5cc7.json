@@ -1,0 +1,12 @@
+[
+  {
+    "id": "3d0e6034-dc33-4a78-9b3f-85fff7256ae5",
+    "name": "Hedgefox",
+    "host": "5.83.140.142",
+    "port": 22,
+    "username": "root",
+    "authType": "password",
+    "passwordEnc": "enc$tY2DhvlyZbdM9xp1$rX9I04BmgymZZImuDkCejQ==$/lVyX+I/9wbdxsk=",
+    "privateKeyEnc": null
+  }
+]
